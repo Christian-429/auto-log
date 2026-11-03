@@ -1,228 +1,179 @@
+"""Simple desktop launcher for the auto-log workflows."""
+
+import os
+import re
+import subprocess
 import sys
-import time
-from datetime import datetime
-
-import pyautogui as pg
-import pyperclip as clip
-
-from config import (
-    NAME,
-    POSITION,
-    CONTACT_MODE,
-    CORDS,
-    INPUT_FILE,
-    REFERENCE_SCREEN_SIZE,
-)
-from screen_coordinates import scale_coordinates
+import tkinter as tk
+from pathlib import Path
+from tkinter import messagebox, simpledialog
 
 
-# ---------------------------------------------------------------------------
-# Application settings and screen layout
-# ---------------------------------------------------------------------------
-
-pg.PAUSE = 0.25
-
-RESET = "__NOTHING_COPIED__"
-COPY_SETTLE_DELAY = 0.25
-CLICK_SETTLE_DELAY = 0.2
-
-MOD = "command" if sys.platform == "darwin" else "ctrl"
+PROJECT_DIR = Path(__file__).resolve().parent
+INPUT_FILE = PROJECT_DIR / "input.txt"
+YEAR_PATTERN = re.compile(r"^\d{4}-\d{4}$")
 
 
-# CORDS in config.py remain easy to calibrate (2880 x 1800); all clicks below
-# use display-relative versions of those points.
-CORDS = scale_coordinates(CORDS, REFERENCE_SCREEN_SIZE)
+class AutoLogApp(tk.Tk):
+    """A small, extensible menu for the project scripts."""
 
+    def __init__(self):
+        super().__init__()
+        self.title("TRIO Tools")
+        self.minsize(680, 475)
+        self.resizable(True, True)
 
-def activate_browser_tab(number):
-    pg.hotkey(MOD, str(number))
+        self.status = tk.StringVar(value="by Christian J :)")
+        self._build_menu()
 
+    def _build_menu(self):
+        self.menu_frame = tk.Frame(self, padx=28, pady=24)
+        self.menu_frame.pack(fill="both", expand=True)
 
-# ---------------------------------------------------------------------------
-# Input and appointment-row helpers
-# ---------------------------------------------------------------------------
+        tk.Label(
+            self.menu_frame,
+            text="TRIO tools",
+            font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            self.menu_frame,
+            text="Choose the task you want to run.",
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", pady=(2, 18))
 
-def get_student_ids(filename):
-    with open(filename, "r") as file:
-        return [line.strip() for line in file if line.strip()]
+        self._add_action(
+            "Update logs from scratch",
+            "Read each student in input.txt and write their appointments to the log.",
+            self.run_log_update,
+        )
+        self._add_action(
+            "Add a new school-year tab",
+            "Create and prepare a new year tab for every student log.",
+            self.add_school_year,
+        )
+        self._add_action(
+            "Update student IDs",
+            "View, add, remove, or reorder the IDs saved in input.txt.",
+            self.show_input_editor,
+        )
 
+        tk.Label(
+            self.menu_frame,
+            textvariable=self.status,
+            anchor="w",
+            fg="#555555",
+        ).pack(fill="x", pady=(16, 0))
 
-def sort_by_date(rows):
-    return sorted(rows, key=lambda row: datetime.strptime(row[0], "%m/%d/%Y"))
+    def _add_action(self, title, description, command):
+        card = tk.Frame(self.menu_frame, bd=1, relief="solid", padx=16, pady=12)
+        card.pack(fill="x", pady=5)
 
+        tk.Label(card, text=title, font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        tk.Label(card, text=description, justify="left", wraplength=570).pack(
+            anchor="w", pady=(3, 9)
+        )
+        tk.Button(card, text=title, command=command, padx=12).pack(anchor="e")
 
-def parse_row(raw):
-    try:
-        cols = [c.strip() for c in raw.split("\t")]
-    except AttributeError:
-        return False
+    def run_log_update(self):
+        ready = messagebox.askokcancel(
+            "Start log update?",
+            "Before continuing, make sure the appointment site is in browser tab 1 "
+            "and the student-log sheet is in browser tab 2.\n\n"
+            "The script will use the IDs currently saved in input.txt.",
+        )
+        if ready:
+            self._launch([sys.executable, "main.py"], "Log update started in a separate window.")
 
-    raw_name = cols[0]
-    date = cols[1]
-    service_field = cols[6]
-    note = cols[7]
+    def add_school_year(self):
+        year = simpledialog.askstring(
+            "New school year",
+            "Enter the school year (for example, 2027-2028):",
+            parent=self,
+        )
+        if year is None:
+            return
+        year = year.strip()
+        if not YEAR_PATTERN.fullmatch(year):
+            messagebox.showerror(
+                "Invalid school year",
+                "Use the format YYYY-YYYY, for example 2027-2028.",
+                parent=self,
+            )
+            return
 
-    name = NAME.get(raw_name, raw_name)
-    position = POSITION.get(raw_name, "")
+        ready = messagebox.askokcancel(
+            "Add school-year tabs?",
+            "Make sure the required browser tabs and sheet are open before continuing.",
+            parent=self,
+        )
+        if ready:
+            self._launch(
+                [sys.executable, "-m", "addTab", year],
+                f"Creating {year} tabs in a separate window.",
+            )
 
-    tokens = [t.strip() for t in service_field.split(",")]
-    contact = next((CONTACT_MODE[t] for t in tokens if t in CONTACT_MODE), "")
+    def show_input_editor(self):
+        self.menu_frame.pack_forget()
+        self.editor_frame = tk.Frame(self, padx=28, pady=24)
+        self.editor_frame.pack(fill="both", expand=True)
 
-    return [date, name, position, contact, "", note]
+        tk.Label(
+            self.editor_frame,
+            text="Student IDs",
+            font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            self.editor_frame,
+            text="Enter one student ID per line. These are the IDs used by both workflows.",
+        ).pack(anchor="w", pady=(2, 12))
 
+        self.input_text = tk.Text(self.editor_frame, height=15, wrap="none", undo=True)
+        self.input_text.pack(fill="both", expand=True)
+        self.input_text.insert("1.0", self._read_input_file())
 
-# ---------------------------------------------------------------------------
-# Appointment grid: select a student and collect their appointments
-# ---------------------------------------------------------------------------
+        controls = tk.Frame(self.editor_frame, pady=12)
+        controls.pack(fill="x")
+        tk.Button(controls, text="Back", command=self.show_menu).pack(side="left")
+        tk.Button(controls, text="Save student IDs", command=self.save_input_file, padx=12).pack(
+            side="right"
+        )
 
-def copy_current_row():
-    clip.copy(RESET)
-    pg.hotkey(MOD, "c")
-    time.sleep(COPY_SETTLE_DELAY)
-    data = clip.paste()
+    def show_menu(self):
+        self.editor_frame.destroy()
+        self.menu_frame.pack(fill="both", expand=True)
 
-    if data == RESET or "\t" not in data:
-        return None
-    return data
+    def _read_input_file(self):
+        try:
+            return INPUT_FILE.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return ""
 
+    def save_input_file(self):
+        # Normalize blank lines while retaining the one-ID-per-line file format.
+        student_ids = [line.strip() for line in self.input_text.get("1.0", "end-1c").splitlines()]
+        content = "\n".join(student_id for student_id in student_ids if student_id)
+        if content:
+            content += "\n"
 
-def select_student(student_id):
-    # The appointment site must be in browser tab 1.
-    activate_browser_tab(1)
+        INPUT_FILE.write_text(content, encoding="utf-8")
+        self.status.set(f"Saved {len(content.splitlines())} student IDs to input.txt.")
+        messagebox.showinfo("Saved", "input.txt has been updated.", parent=self)
 
-    pg.doubleClick(CORDS["studentName"])
+    def _launch(self, command, message):
+        options = {"cwd": PROJECT_DIR}
+        if os.name == "nt":
+            # addTab.py may prompt for a year when run outside this launcher;
+            # a separate console keeps any script messages visible.
+            options["creationflags"] = subprocess.CREATE_NEW_CONSOLE
 
-    pg.press("Backspace")
-    pg.write(student_id)
+        try:
+            subprocess.Popen(command, **options)
+        except OSError as error:
+            messagebox.showerror("Could not start workflow", str(error), parent=self)
+            return
 
-    pg.leftClick(CORDS["app_first_row"])
-    time.sleep(CLICK_SETTLE_DELAY)
-
-
-def next_page():
-    pg.click(CORDS["next_button"])
-    time.sleep(CLICK_SETTLE_DELAY)
-    pg.click(CORDS['top_of_grid'], clicks=3)
-    # pg.moveTo(CORDS["sort_grid"])
-    pg.click(CORDS["sort_grid"], clicks=3)
-    time.sleep(0.15)
-    pg.click(CORDS["app_first_row"])
-
-
-def collect_appointments(student_id):
-    select_student(student_id)
-
-    appointments = []
-    prev_raw = None
-
-    while True:
-        raw = copy_current_row()
-
-        clean = parse_row(raw)
-
-        if appointments and appointments[0] == ['', '', '', '', '', '']:
-            appointments.pop(0)
-        if not clean:
-            raw = copy_current_row()
-            clean = parse_row(raw)
-        if appointments and (clean == appointments[0]):  # is this new page the same as the first one?
-            break
-        if raw is None or raw == prev_raw:  # the list has stopped advancing
-            next_page()
-            raw = copy_current_row()
-            if raw == prev_raw:
-                pg.press("down")
-            continue
-
-        appointments.append(clean)
-        prev_raw = raw
-        pg.press("down")
-    return appointments
-
-
-# ---------------------------------------------------------------------------
-# Student sheet: locate the log and paste appointment rows
-# ---------------------------------------------------------------------------
-
-def go_to_beginning():
-    """Navigate the open student log sheet to its first entry row."""
-    pg.click(CORDS["sheets_menu"])
-    pg.click(CORDS["beginning_log_tab"])
-    pg.click(CORDS["w_ID"])
-
-
-def move_to_next_tab():
-    """Move from the current school-year sheet tab to the next one."""
-    pg.hotkey("alt", "up")
-    pg.press("down", presses=6, interval=0.05)
-
-
-def find_student_log(student_id):
-    # The student-log sheet must be in browser tab 2.
-    activate_browser_tab(2)
-    pg.click(CORDS["w_ID"])
-
-    is_found = False
-    while not is_found:
-        pg.press("down")
-        pg.hotkey(MOD, "c")
-        if clip.paste() == student_id:
-            pg.press("enter")
-            time.sleep(CLICK_SETTLE_DELAY)
-            pg.press("tab")
-            time.sleep(CLICK_SETTLE_DELAY)
-            pg.press("enter")
-            time.sleep(CLICK_SETTLE_DELAY + 4)
-            go_to_beginning()
-            pg.press("down", presses=6, interval=0.05)
-            return True
-    print("unable to find student")
-    return is_found
-
-
-def write_to_sheets(appts, student_id):
-    find_student_log(student_id)
-
-    first_date = datetime.strptime(appts[0][0], "%m/%d/%Y")
-
-    if first_date.month in (1, 2, 3, 4, 5, 6, 7, 8):
-        curr_year = first_date.year - 1
-    else:
-        curr_year = first_date.year
-
-    end_year = curr_year + 1
-    for app in appts:
-        clip.copy("\t".join(app))
-        if datetime.strptime(app[0], "%m/%d/%Y") > datetime.strptime(f"9/1/{end_year}", "%m/%d/%Y"):
-            move_to_next_tab()
-            end_year += 1
-        pg.hotkey(MOD, "v")
-        pg.press("down")
-    time.sleep(CLICK_SETTLE_DELAY)
-    # The student-specific sheet opens in browser tab 3.  Closing it by tab
-    # number works even when browser tabs have different widths.
-    activate_browser_tab(3)
-    time.sleep(CLICK_SETTLE_DELAY)
-    pg.hotkey(MOD, "w")
-    activate_browser_tab(2)
-    pg.click(CORDS["reload_tab_2"])
-    pg.click(CORDS["reload_button"])
-
-
-# ---------------------------------------------------------------------------
-# Program entry point
-# ---------------------------------------------------------------------------
-
-def main():
-    student_ids = get_student_ids(INPUT_FILE)
-    time.sleep(5)
-
-    for student_id in student_ids:
-        appointments = sort_by_date(collect_appointments(student_id))
-        write_to_sheets(appointments, student_id)
-        print(f"finished {student_id}")
+        self.status.set(message)
 
 
 if __name__ == "__main__":
-    main()
-    print("Done!")
+    AutoLogApp().mainloop()
