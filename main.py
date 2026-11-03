@@ -1,25 +1,45 @@
+import sys
 import time
 from datetime import datetime
 
 import pyautogui as pg
 import pyperclip as clip
 
-from config import NAME, POSITION, CONTACT_MODE, CORDS, INPUT_FILE
+from config import (
+    NAME,
+    POSITION,
+    CONTACT_MODE,
+    CORDS,
+    INPUT_FILE,
+    REFERENCE_SCREEN_SIZE,
+)
+from screen_coordinates import scale_coordinates
 
 
 # ---------------------------------------------------------------------------
-# Settings
+# Application settings and screen layout
 # ---------------------------------------------------------------------------
 
-pg.PAUSE = 0.3
+pg.PAUSE = 0.25
 
-SENTINEL = "__NOTHING_COPIED__"
-COPY_SETTLE_DELAY = 0.3
+RESET = "__NOTHING_COPIED__"
+COPY_SETTLE_DELAY = 0.25
 CLICK_SETTLE_DELAY = 0.2
 
+MOD = "command" if sys.platform == "darwin" else "ctrl"
+
+
+# CORDS in config.py remain easy to calibrate (2880 x 1800); all clicks below
+# use display-relative versions of those points.
+CORDS = scale_coordinates(CORDS, REFERENCE_SCREEN_SIZE)
+
+
+def activate_browser_tab(number):
+    pg.hotkey(MOD, str(number))
+
 
 # ---------------------------------------------------------------------------
-# Input / data helpers
+# Input and appointment-row helpers
 # ---------------------------------------------------------------------------
 
 def get_student_ids(filename):
@@ -37,7 +57,6 @@ def parse_row(raw):
     except AttributeError:
         return False
 
-
     raw_name = cols[0]
     date = cols[1]
     service_field = cols[6]
@@ -53,45 +72,41 @@ def parse_row(raw):
 
 
 # ---------------------------------------------------------------------------
-# Appointment grid: reading appointments for one student
+# Appointment grid: select a student and collect their appointments
 # ---------------------------------------------------------------------------
 
 def copy_current_row():
-    clip.copy(SENTINEL)
-    pg.hotkey("ctrl", "c")
+    clip.copy(RESET)
+    pg.hotkey(MOD, "c")
     time.sleep(COPY_SETTLE_DELAY)
     data = clip.paste()
 
-    if data == SENTINEL or "\t" not in data:
+    if data == RESET or "\t" not in data:
         return None
     return data
 
 
 def select_student(student_id):
-    pg.moveTo(CORDS["tab1"])
-    pg.leftClick()
+    # The appointment site must be in browser tab 1.
+    activate_browser_tab(1)
 
-    pg.moveTo(CORDS["studentName"])
-    pg.doubleClick()
+    pg.doubleClick(CORDS["studentName"])
 
     pg.press("Backspace")
     pg.write(student_id)
 
-    pg.moveTo(CORDS["app_first_row"])
-    pg.leftClick()
+    pg.leftClick(CORDS["app_first_row"])
     time.sleep(CLICK_SETTLE_DELAY)
 
 
-# Moves to the next page on the grid page
 def next_page():
-    pg.moveTo(CORDS["next_button"])
-    pg.click()
+    pg.click(CORDS["next_button"])
     time.sleep(CLICK_SETTLE_DELAY)
-    pg.click(CORDS['top_of_grid'], clicks= 3)
+    pg.click(CORDS['top_of_grid'], clicks=3)
     # pg.moveTo(CORDS["sort_grid"])
     pg.click(CORDS["sort_grid"], clicks=3)
-    pg.moveTo(CORDS["app_first_row"])
-    pg.click()
+    time.sleep(0.15)
+    pg.click(CORDS["app_first_row"])
 
 
 def collect_appointments(student_id):
@@ -99,12 +114,14 @@ def collect_appointments(student_id):
 
     appointments = []
     prev_raw = None
-    
+
     while True:
         raw = copy_current_row()
 
         clean = parse_row(raw)
 
+        if appointments and appointments[0] == ['', '', '', '', '', '']:
+            appointments.pop(0)
         if not clean:
             raw = copy_current_row()
             clean = parse_row(raw)
@@ -124,34 +141,31 @@ def collect_appointments(student_id):
 
 
 # ---------------------------------------------------------------------------
-# Sheets: after appointments are collected
-# (`appointments` holds all of ONE student's appointments)
+# Student sheet: locate the log and paste appointment rows
 # ---------------------------------------------------------------------------
 
 def go_to_beginning():
-    pg.moveTo(CORDS["sheets_menu"])
-    pg.click()
-    pg.moveTo(CORDS["beginning_log_tab"])
-    pg.click()
-    pg.moveTo(CORDS["w_ID"])
-    pg.click()
+    """Navigate the open student log sheet to its first entry row."""
+    pg.click(CORDS["sheets_menu"])
+    pg.click(CORDS["beginning_log_tab"])
+    pg.click(CORDS["w_ID"])
 
 
 def move_to_next_tab():
+    """Move from the current school-year sheet tab to the next one."""
     pg.hotkey("alt", "up")
     pg.press("down", presses=6, interval=0.05)
 
 
 def find_student_log(student_id):
-    pg.moveTo(CORDS["tab2"])
-    pg.click()
-    pg.moveTo(CORDS["w_ID"])
-    pg.click()
+    # The student-log sheet must be in browser tab 2.
+    activate_browser_tab(2)
+    pg.click(CORDS["w_ID"])
 
     is_found = False
     while not is_found:
         pg.press("down")
-        pg.hotkey("ctrl", "c")
+        pg.hotkey(MOD, "c")
         if clip.paste() == student_id:
             pg.press("enter")
             time.sleep(CLICK_SETTLE_DELAY)
@@ -171,7 +185,7 @@ def write_to_sheets(appts, student_id):
 
     first_date = datetime.strptime(appts[0][0], "%m/%d/%Y")
 
-    if first_date.month in (1,2,3,4,5, 6, 7, 8):
+    if first_date.month in (1, 2, 3, 4, 5, 6, 7, 8):
         curr_year = first_date.year - 1
     else:
         curr_year = first_date.year
@@ -182,20 +196,21 @@ def write_to_sheets(appts, student_id):
         if datetime.strptime(app[0], "%m/%d/%Y") > datetime.strptime(f"9/1/{end_year}", "%m/%d/%Y"):
             move_to_next_tab()
             end_year += 1
-        pg.hotkey("ctrl", "v")
+        pg.hotkey(MOD, "v")
         pg.press("down")
     time.sleep(CLICK_SETTLE_DELAY)
-    pg.moveTo(CORDS["close_tab_3"])
+    # The student-specific sheet opens in browser tab 3.  Closing it by tab
+    # number works even when browser tabs have different widths.
+    activate_browser_tab(3)
     time.sleep(CLICK_SETTLE_DELAY)
-    pg.click()
-    pg.moveTo(CORDS["reload_tab_2"])
-    pg.click()
-    pg.moveTo(CORDS["reload_button"])
-    pg.click()
+    pg.hotkey(MOD, "w")
+    activate_browser_tab(2)
+    pg.click(CORDS["reload_tab_2"])
+    pg.click(CORDS["reload_button"])
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Program entry point
 # ---------------------------------------------------------------------------
 
 def main():

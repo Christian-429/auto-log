@@ -1,0 +1,1 @@
+wrote these to help me with task where I work

@@ -1,7 +1,9 @@
+import sys
 import time
 import pyautogui as pg
 import pyperclip as clip
-from config import ADD_TAB_CORDS as CORDS
+from config import ADD_TAB_CORDS, REFERENCE_SCREEN_SIZE
+from screen_coordinates import scale_coordinates
 # tab name must be in format 20xx-20xx, e.g. 2026-2027
 
 
@@ -13,7 +15,11 @@ ID_LIST_PATH = 'input.txt'
 pg.PAUSE = 0.3
 STUDENT_START = 1
 
+CORDS = scale_coordinates(ADD_TAB_CORDS, REFERENCE_SCREEN_SIZE)
+
 def get_tab_name():
+    if len(sys.argv) > 1:
+        return sys.argv[1]
     return input('Enter the new year to be added (format: 20xx-20xx): ')
 
 
