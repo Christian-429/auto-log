@@ -13,6 +13,22 @@ PROJECT_DIR = Path(__file__).resolve().parent
 INPUT_FILE = PROJECT_DIR / "input.txt"
 YEAR_PATTERN = re.compile(r"^\d{4}-\d{4}$")
 
+COLORS = {
+    "background": "#F4F7FB",
+    "surface": "#FFFFFF",
+    "border": "#DCE4F0",
+    "heading": "#152B4F",
+    "text": "#34435C",
+    "muted": "#66758D",
+    "accent": "#2563EB",
+    "accent_active": "#1D4ED8",
+    "header": "#17355F",
+    "header_text": "#F8FAFC",
+    "header_muted": "#C9D7E9",
+}
+
+FONT = "Segoe UI"
+
 
 class AutoLogApp(tk.Tk):
     """A small, extensible menu for the project scripts."""
@@ -20,59 +36,153 @@ class AutoLogApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("TRIO Tools")
-        self.minsize(680, 475)
+        self.geometry("760x560")
+        self.minsize(700, 520)
         self.resizable(True, True)
+        self.configure(bg=COLORS["background"])
 
         self.status = tk.StringVar(value="by Christian J :)")
         self._build_menu()
 
     def _build_menu(self):
-        self.menu_frame = tk.Frame(self, padx=28, pady=24)
+        self.menu_frame = tk.Frame(self, bg=COLORS["background"])
         self.menu_frame.pack(fill="both", expand=True)
 
+        self._build_header(self.menu_frame)
+
+        content = tk.Frame(self.menu_frame, bg=COLORS["background"], padx=30, pady=24)
+        content.pack(fill="both", expand=True)
+
         tk.Label(
-            self.menu_frame,
-            text="TRIO tools",
-            font=("Segoe UI", 20, "bold"),
+            content,
+            text="What would you like to do?",
+            bg=COLORS["background"],
+            fg=COLORS["heading"],
+            font=(FONT, 15, "bold"),
         ).pack(anchor="w")
         tk.Label(
-            self.menu_frame,
-            text="Choose the task you want to run.",
-            font=("Segoe UI", 10),
-        ).pack(anchor="w", pady=(2, 18))
+            content,
+            text="Choose a workflow to begin. Your student IDs are managed in one place.",
+            bg=COLORS["background"],
+            fg=COLORS["muted"],
+            font=(FONT, 10),
+        ).pack(anchor="w", pady=(3, 16))
 
         self._add_action(
+            content,
             "Update logs from scratch",
             "Read each student in input.txt and write their appointments to the log.",
             self.run_log_update,
+            "Start update",
         )
         self._add_action(
+            content,
             "Add a new school-year tab",
             "Create and prepare a new year tab for every student log.",
             self.add_school_year,
+            "Add year tab",
         )
         self._add_action(
+            content,
             "Update student IDs",
             "View, add, remove, or reorder the IDs saved in input.txt.",
             self.show_input_editor,
+            "Manage IDs",
         )
 
+        status_bar = tk.Frame(content, bg=COLORS["background"], pady=8)
+        status_bar.pack(fill="x", pady=(10, 0))
         tk.Label(
-            self.menu_frame,
+            status_bar,
             textvariable=self.status,
             anchor="w",
-            fg="#555555",
-        ).pack(fill="x", pady=(16, 0))
+            bg=COLORS["background"],
+            fg=COLORS["muted"],
+            font=(FONT, 9),
+        ).pack(fill="x")
 
-    def _add_action(self, title, description, command):
-        card = tk.Frame(self.menu_frame, bd=1, relief="solid", padx=16, pady=12)
+    def _build_header(self, parent):
+        header = tk.Frame(parent, bg=COLORS["header"], padx=30, pady=22)
+        header.pack(fill="x")
+        tk.Label(
+            header,
+            text="TRIO Tools",
+            bg=COLORS["header"],
+            fg=COLORS["header_text"],
+            font=(FONT, 22, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            header,
+            text="Student log workflows, all in one place",
+            bg=COLORS["header"],
+            fg=COLORS["header_muted"],
+            font=(FONT, 10),
+        ).pack(anchor="w", pady=(3, 0))
+
+    def _add_action(self, parent, title, description, command, button_label):
+        card = tk.Frame(
+            parent,
+            bg=COLORS["surface"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+            padx=18,
+            pady=15,
+        )
         card.pack(fill="x", pady=5)
 
-        tk.Label(card, text=title, font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        tk.Label(card, text=description, justify="left", wraplength=570).pack(
-            anchor="w", pady=(3, 9)
+        text_area = tk.Frame(card, bg=COLORS["surface"])
+        text_area.pack(side="left", fill="both", expand=True)
+
+        tk.Label(
+            text_area,
+            text=title,
+            bg=COLORS["surface"],
+            fg=COLORS["heading"],
+            font=(FONT, 11, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            text_area,
+            text=description,
+            justify="left",
+            wraplength=430,
+            bg=COLORS["surface"],
+            fg=COLORS["text"],
+            font=(FONT, 9),
+        ).pack(anchor="w", pady=(4, 0))
+        self._button(card, button_label, command).pack(side="right", padx=(18, 0), pady=4)
+
+    def _button(self, parent, text, command, secondary=False):
+        if secondary:
+            return tk.Button(
+                parent,
+                text=text,
+                command=command,
+                bg=COLORS["surface"],
+                fg=COLORS["heading"],
+                activebackground="#E8EEF7",
+                activeforeground=COLORS["heading"],
+                highlightthickness=0,
+                bd=0,
+                padx=14,
+                pady=8,
+                font=(FONT, 9, "bold"),
+                cursor="hand2",
+            )
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=COLORS["accent"],
+            fg="white",
+            activebackground=COLORS["accent_active"],
+            activeforeground="white",
+            highlightthickness=0,
+            bd=0,
+            padx=14,
+            pady=8,
+            font=(FONT, 9, "bold"),
+            cursor="hand2",
         )
-        tk.Button(card, text=title, command=command, padx=12).pack(anchor="e")
 
     def run_log_update(self):
         ready = messagebox.askokcancel(
@@ -82,7 +192,7 @@ class AutoLogApp(tk.Tk):
             "The script will use the IDs currently saved in input.txt.",
         )
         if ready:
-            self._launch([sys.executable, "main.py"], "Log update started in a separate window.")
+            self._launch([sys.executable, "log.py"], "Log update started in a separate window.")
 
     def add_school_year(self):
         year = simpledialog.askstring(
@@ -114,29 +224,51 @@ class AutoLogApp(tk.Tk):
 
     def show_input_editor(self):
         self.menu_frame.pack_forget()
-        self.editor_frame = tk.Frame(self, padx=28, pady=24)
+        self.editor_frame = tk.Frame(self, bg=COLORS["background"])
         self.editor_frame.pack(fill="both", expand=True)
 
+        self._build_header(self.editor_frame)
+        content = tk.Frame(self.editor_frame, bg=COLORS["background"], padx=30, pady=24)
+        content.pack(fill="both", expand=True)
+
         tk.Label(
-            self.editor_frame,
+            content,
             text="Student IDs",
-            font=("Segoe UI", 20, "bold"),
+            bg=COLORS["background"],
+            fg=COLORS["heading"],
+            font=(FONT, 15, "bold"),
         ).pack(anchor="w")
         tk.Label(
-            self.editor_frame,
+            content,
             text="Enter one student ID per line. These are the IDs used by both workflows.",
-        ).pack(anchor="w", pady=(2, 12))
+            bg=COLORS["background"],
+            fg=COLORS["muted"],
+            font=(FONT, 10),
+        ).pack(anchor="w", pady=(3, 14))
 
-        self.input_text = tk.Text(self.editor_frame, height=15, wrap="none", undo=True)
+        self.input_text = tk.Text(
+            content,
+            height=15,
+            wrap="none",
+            undo=True,
+            bg=COLORS["surface"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["heading"],
+            relief="flat",
+            highlightbackground=COLORS["border"],
+            highlightcolor=COLORS["accent"],
+            highlightthickness=1,
+            padx=12,
+            pady=10,
+            font=("Consolas", 10),
+        )
         self.input_text.pack(fill="both", expand=True)
         self.input_text.insert("1.0", self._read_input_file())
 
-        controls = tk.Frame(self.editor_frame, pady=12)
+        controls = tk.Frame(content, bg=COLORS["background"], pady=14)
         controls.pack(fill="x")
-        tk.Button(controls, text="Back", command=self.show_menu).pack(side="left")
-        tk.Button(controls, text="Save student IDs", command=self.save_input_file, padx=12).pack(
-            side="right"
-        )
+        self._button(controls, "Back", self.show_menu, secondary=True).pack(side="left")
+        self._button(controls, "Save student IDs", self.save_input_file).pack(side="right")
 
     def show_menu(self):
         self.editor_frame.destroy()
