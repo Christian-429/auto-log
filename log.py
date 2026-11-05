@@ -145,14 +145,12 @@ def collect_appointments(student_id):
 # ---------------------------------------------------------------------------
 
 def go_to_beginning():
-    """Navigate the open student log sheet to its first entry row."""
     pg.click(CORDS["sheets_menu"])
     pg.click(CORDS["beginning_log_tab"])
     pg.click(CORDS["w_ID"])
 
 
 def move_to_next_tab():
-    """Move from the current school-year sheet tab to the next one."""
     pg.hotkey("alt", "up")
     pg.press("down", presses=6, interval=0.05)
 
@@ -192,6 +190,8 @@ def write_to_sheets(appts, student_id):
 
     end_year = curr_year + 1
     for app in appts:
+        #TODO check if box has the program complete and shift it down if it does
+        
         clip.copy("\t".join(app))
         if datetime.strptime(app[0], "%m/%d/%Y") > datetime.strptime(f"9/1/{end_year}", "%m/%d/%Y"):
             move_to_next_tab()

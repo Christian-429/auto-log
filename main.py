@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -36,8 +36,8 @@ class AutoLogApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("TRIO Tools")
-        self.geometry("760x560")
-        self.minsize(700, 520)
+        self.geometry("760x610")
+        self.minsize(700, 560)
         self.resizable(True, True)
         self.configure(bg=COLORS["background"])
 
@@ -244,11 +244,51 @@ class AutoLogApp(tk.Tk):
             bg=COLORS["background"],
             fg=COLORS["muted"],
             font=(FONT, 10),
-        ).pack(anchor="w", pady=(3, 14))
+        ).pack(anchor="w", pady=(3, 12))
+
+        format_card = tk.Frame(
+            content,
+            bg=COLORS["surface"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+            padx=14,
+            pady=12,
+        )
+        format_card.pack(fill="x", pady=(0, 14))
+
+        format_text = tk.Frame(format_card, bg=COLORS["surface"])
+        format_text.pack(side="left", fill="both", expand=True)
+        tk.Label(
+            format_text,
+            text="Accepted format",
+            bg=COLORS["surface"],
+            fg=COLORS["heading"],
+            font=(FONT, 10, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            format_text,
+            text="Paste IDs below or import a .txt file. Use one numeric student ID per line; blank lines are ignored.",
+            bg=COLORS["surface"],
+            fg=COLORS["text"],
+            justify="left",
+            wraplength=390,
+            font=(FONT, 9),
+        ).pack(anchor="w", pady=(3, 0))
+        tk.Label(
+            format_text,
+            text=f"Example from input.txt:\n{self._input_example()}",
+            bg=COLORS["surface"],
+            fg=COLORS["muted"],
+            justify="left",
+            font=("Consolas", 9),
+        ).pack(anchor="w", pady=(8, 0))
+        self._button(format_card, "Import .txt file", self.import_student_ids, secondary=True).pack(
+            side="right", padx=(16, 0), pady=4
+        )
 
         self.input_text = tk.Text(
             content,
-            height=15,
+            height=10,
             wrap="none",
             undo=True,
             bg=COLORS["surface"],
@@ -267,8 +307,8 @@ class AutoLogApp(tk.Tk):
 
         controls = tk.Frame(content, bg=COLORS["background"], pady=14)
         controls.pack(fill="x")
-        self._button(controls, "Back", self.show_menu, secondary=True).pack(side="left")
-        self._button(controls, "Save student IDs", self.save_input_file).pack(side="right")
+        self._button(controls, "Main menu", self.show_menu, secondary=True).pack(side="left")
+        self._button(controls, "Save to input.txt", self.save_input_file).pack(side="right")
 
     def show_menu(self):
         self.editor_frame.destroy()
@@ -280,14 +320,105 @@ class AutoLogApp(tk.Tk):
         except FileNotFoundError:
             return ""
 
+    def _input_example(self):
+        """Return a small, live sample of the IDs already in input.txt."""
+        student_ids = [line.strip() for line in self._read_input_file().splitlines() if line.strip()]
+        if not student_ids:
+            return "1234567\n2345678"
+
+        example = student_ids[:3]
+        if len(student_ids) > len(example):
+            example.append("...")
+        return "\n".join(example)
+
+    def _validate_student_ids(self, content):
+        """Return cleaned IDs and any non-numeric lines that need correction."""
+        student_ids = []
+        invalid_lines = []
+
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            student_id = line.strip()
+            if not student_id:
+                continue
+            if student_id.isdigit():
+                student_ids.append(student_id)
+            else:
+                invalid_lines.append((line_number, student_id))
+
+        return student_ids, invalid_lines
+
+    def _show_invalid_id_error(self, invalid_lines):
+        """Explain which entries do not match the documented ID format."""
+        examples = "\n".join(
+            f"Line {line_number}: {student_id}" for line_number, student_id in invalid_lines[:5]
+        )
+        remaining = len(invalid_lines) - 5
+        if remaining > 0:
+            examples += f"\n...and {remaining} more."
+
+        messagebox.showerror(
+            "Fix student ID format",
+            "Each non-blank line must contain only one numeric student ID.\n\n"
+            f"Entries to fix:\n{examples}",
+            parent=self,
+        )
+
+    def import_student_ids(self):
+        """Load a selected text file into the editor without saving it yet."""
+        filename = filedialog.askopenfilename(
+            parent=self,
+            title="Import student IDs",
+            initialdir=PROJECT_DIR,
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if not filename:
+            return
+
+        try:
+            imported_content = Path(filename).read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError) as error:
+            messagebox.showerror(
+                "Could not import file",
+                f"The selected file could not be read.\n\n{error}",
+                parent=self,
+            )
+            return
+
+        self.input_text.delete("1.0", "end")
+        self.input_text.insert("1.0", imported_content)
+        student_ids, invalid_lines = self._validate_student_ids(imported_content)
+        if invalid_lines:
+            self.status.set("The file was loaded, but some IDs need correction before it can be saved.")
+            self._show_invalid_id_error(invalid_lines)
+            return
+
+        self.status.set(
+            f"Loaded {len(student_ids)} student IDs. Review the list, then select Save to input.txt."
+        )
+
     def save_input_file(self):
         # Normalize blank lines while retaining the one-ID-per-line file format.
-        student_ids = [line.strip() for line in self.input_text.get("1.0", "end-1c").splitlines()]
-        content = "\n".join(student_id for student_id in student_ids if student_id)
+        student_ids, invalid_lines = self._validate_student_ids(
+            self.input_text.get("1.0", "end-1c")
+        )
+        if invalid_lines:
+            self._show_invalid_id_error(invalid_lines)
+            return
+
+        content = "\n".join(student_ids)
         if content:
             content += "\n"
 
-        INPUT_FILE.write_text(content, encoding="utf-8")
+        try:
+            INPUT_FILE.write_text(content, encoding="utf-8")
+        except OSError as error:
+            messagebox.showerror(
+                "Could not save input.txt",
+                f"The student IDs were not saved.\n\n{error}",
+                parent=self,
+            )
+            return
+
         self.status.set(f"Saved {len(content.splitlines())} student IDs to input.txt.")
         messagebox.showinfo("Saved", "input.txt has been updated.", parent=self)
 
