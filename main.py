@@ -1,442 +1,181 @@
-"""Simple desktop launcher for the auto-log workflows."""
+"""Local web dashboard for the TRIO automation tools.
 
-import os
+The browser handles the user interface and file management. The existing
+Python scripts remain responsible for desktop/browser automation because web
+pages cannot safely control other Windows applications.
+"""
+
+from __future__ import annotations
+
+import json
 import re
 import subprocess
 import sys
-import tkinter as tk
+import webbrowser
+from http import HTTPStatus
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog
+from urllib.parse import urlparse
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
 INPUT_FILE = PROJECT_DIR / "input.txt"
+WEB_APP_FILE = PROJECT_DIR / "web_app.html"
 YEAR_PATTERN = re.compile(r"^\d{4}-\d{4}$")
 
-COLORS = {
-    "background": "#F4F7FB",
-    "surface": "#FFFFFF",
-    "border": "#DCE4F0",
-    "heading": "#152B4F",
-    "text": "#34435C",
-    "muted": "#66758D",
-    "accent": "#2563EB",
-    "accent_active": "#1D4ED8",
-    "header": "#17355F",
-    "header_text": "#F8FAFC",
-    "header_muted": "#C9D7E9",
-}
 
-FONT = "Segoe UI"
+def read_student_ids() -> list[str]:
+    """Read the saved IDs, ignoring blank lines."""
+    try:
+        return [line.strip() for line in INPUT_FILE.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except FileNotFoundError:
+        return []
 
 
-class AutoLogApp(tk.Tk):
-    """A small, extensible menu for the project scripts."""
+def validate_student_ids(value: str) -> tuple[list[str], list[dict[str, object]]]:
+    """Return normalized IDs plus details for lines that require correction."""
+    student_ids: list[str] = []
+    invalid_lines: list[dict[str, object]] = []
+    for line_number, line in enumerate(value.splitlines(), start=1):
+        student_id = line.strip()
+        if not student_id:
+            continue
+        if student_id.isdigit():
+            student_ids.append(student_id)
+        else:
+            invalid_lines.append({"line": line_number, "value": student_id})
+    return student_ids, invalid_lines
 
-    def __init__(self):
-        super().__init__()
-        self.title("TRIO Tools")
-        self.geometry("760x610")
-        self.minsize(700, 560)
-        self.resizable(True, True)
-        self.configure(bg=COLORS["background"])
 
-        self.status = tk.StringVar(value="by Christian J :)")
-        self._build_menu()
+def launch_automation(command: list[str]) -> None:
+    """Start one of the established desktop automation scripts."""
+    options: dict[str, object] = {"cwd": PROJECT_DIR}
+    if sys.platform == "win32":
+        options["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+    subprocess.Popen(command, **options)
 
-    def _build_menu(self):
-        self.menu_frame = tk.Frame(self, bg=COLORS["background"])
-        self.menu_frame.pack(fill="both", expand=True)
 
-        self._build_header(self.menu_frame)
+class TrioToolsHandler(SimpleHTTPRequestHandler):
+    """Serve the local app and a deliberately small set of project APIs."""
 
-        content = tk.Frame(self.menu_frame, bg=COLORS["background"], padx=30, pady=24)
-        content.pack(fill="both", expand=True)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(PROJECT_DIR), **kwargs)
 
-        tk.Label(
-            content,
-            text="What would you like to do?",
-            bg=COLORS["background"],
-            fg=COLORS["heading"],
-            font=(FONT, 15, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            content,
-            text="Choose a workflow to begin. Your student IDs are managed in one place.",
-            bg=COLORS["background"],
-            fg=COLORS["muted"],
-            font=(FONT, 10),
-        ).pack(anchor="w", pady=(3, 16))
-
-        self._add_action(
-            content,
-            "Update logs from scratch",
-            "Read each student in input.txt and write their appointments to the log.",
-            self.run_log_update,
-            "Start update",
-        )
-        self._add_action(
-            content,
-            "Add a new school-year tab",
-            "Create and prepare a new year tab for every student log.",
-            self.add_school_year,
-            "Add year tab",
-        )
-        self._add_action(
-            content,
-            "Update student IDs",
-            "View, add, remove, or reorder the IDs saved in input.txt.",
-            self.show_input_editor,
-            "Manage IDs",
-        )
-
-        status_bar = tk.Frame(content, bg=COLORS["background"], pady=8)
-        status_bar.pack(fill="x", pady=(10, 0))
-        tk.Label(
-            status_bar,
-            textvariable=self.status,
-            anchor="w",
-            bg=COLORS["background"],
-            fg=COLORS["muted"],
-            font=(FONT, 9),
-        ).pack(fill="x")
-
-    def _build_header(self, parent):
-        header = tk.Frame(parent, bg=COLORS["header"], padx=30, pady=22)
-        header.pack(fill="x")
-        tk.Label(
-            header,
-            text="TRIO Tools",
-            bg=COLORS["header"],
-            fg=COLORS["header_text"],
-            font=(FONT, 22, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            header,
-            text="Student log workflows, all in one place",
-            bg=COLORS["header"],
-            fg=COLORS["header_muted"],
-            font=(FONT, 10),
-        ).pack(anchor="w", pady=(3, 0))
-
-    def _add_action(self, parent, title, description, command, button_label):
-        card = tk.Frame(
-            parent,
-            bg=COLORS["surface"],
-            highlightbackground=COLORS["border"],
-            highlightthickness=1,
-            padx=18,
-            pady=15,
-        )
-        card.pack(fill="x", pady=5)
-
-        text_area = tk.Frame(card, bg=COLORS["surface"])
-        text_area.pack(side="left", fill="both", expand=True)
-
-        tk.Label(
-            text_area,
-            text=title,
-            bg=COLORS["surface"],
-            fg=COLORS["heading"],
-            font=(FONT, 11, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            text_area,
-            text=description,
-            justify="left",
-            wraplength=430,
-            bg=COLORS["surface"],
-            fg=COLORS["text"],
-            font=(FONT, 9),
-        ).pack(anchor="w", pady=(4, 0))
-        self._button(card, button_label, command).pack(side="right", padx=(18, 0), pady=4)
-
-    def _button(self, parent, text, command, secondary=False):
-        if secondary:
-            return tk.Button(
-                parent,
-                text=text,
-                command=command,
-                bg=COLORS["surface"],
-                fg=COLORS["heading"],
-                activebackground="#E8EEF7",
-                activeforeground=COLORS["heading"],
-                highlightthickness=0,
-                bd=0,
-                padx=14,
-                pady=8,
-                font=(FONT, 9, "bold"),
-                cursor="hand2",
-            )
-        return tk.Button(
-            parent,
-            text=text,
-            command=command,
-            bg=COLORS["accent"],
-            fg="white",
-            activebackground=COLORS["accent_active"],
-            activeforeground="white",
-            highlightthickness=0,
-            bd=0,
-            padx=14,
-            pady=8,
-            font=(FONT, 9, "bold"),
-            cursor="hand2",
-        )
-
-    def run_log_update(self):
-        ready = messagebox.askokcancel(
-            "Start log update?",
-            "Before continuing, make sure the appointment site is in browser tab 1 "
-            "and the student-log sheet is in browser tab 2.\n\n"
-            "The script will use the IDs currently saved in input.txt.",
-        )
-        if ready:
-            self._launch([sys.executable, "log.py"], "Log update started in a separate window.")
-
-    def add_school_year(self):
-        year = simpledialog.askstring(
-            "New school year",
-            "Enter the school year (for example, 2027-2028):",
-            parent=self,
-        )
-        if year is None:
+    def do_GET(self):  # noqa: N802 - required by BaseHTTPRequestHandler
+        path = urlparse(self.path).path
+        if path == "/api/student-ids":
+            self._send_json(HTTPStatus.OK, {"student_ids": read_student_ids()})
             return
-        year = year.strip()
-        if not YEAR_PATTERN.fullmatch(year):
-            messagebox.showerror(
-                "Invalid school year",
-                "Use the format YYYY-YYYY, for example 2027-2028.",
-                parent=self,
-            )
-            return
+        if path == "/" or path == "/index.html":
+            self.path = "/web_app.html"
+        super().do_GET()
 
-        ready = messagebox.askokcancel(
-            "Add school-year tabs?",
-            "Make sure the required browser tabs and sheet are open before continuing.",
-            parent=self,
-        )
-        if ready:
-            self._launch(
-                [sys.executable, "-m", "addTab", year],
-                f"Creating {year} tabs in a separate window.",
-            )
-
-    def show_input_editor(self):
-        self.menu_frame.pack_forget()
-        self.editor_frame = tk.Frame(self, bg=COLORS["background"])
-        self.editor_frame.pack(fill="both", expand=True)
-
-        self._build_header(self.editor_frame)
-        content = tk.Frame(self.editor_frame, bg=COLORS["background"], padx=30, pady=24)
-        content.pack(fill="both", expand=True)
-
-        tk.Label(
-            content,
-            text="Student IDs",
-            bg=COLORS["background"],
-            fg=COLORS["heading"],
-            font=(FONT, 15, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            content,
-            text="Enter one student ID per line. These are the IDs used by both workflows.",
-            bg=COLORS["background"],
-            fg=COLORS["muted"],
-            font=(FONT, 10),
-        ).pack(anchor="w", pady=(3, 12))
-
-        format_card = tk.Frame(
-            content,
-            bg=COLORS["surface"],
-            highlightbackground=COLORS["border"],
-            highlightthickness=1,
-            padx=14,
-            pady=12,
-        )
-        format_card.pack(fill="x", pady=(0, 14))
-
-        format_text = tk.Frame(format_card, bg=COLORS["surface"])
-        format_text.pack(side="left", fill="both", expand=True)
-        tk.Label(
-            format_text,
-            text="Accepted format",
-            bg=COLORS["surface"],
-            fg=COLORS["heading"],
-            font=(FONT, 10, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            format_text,
-            text="Paste IDs below or import a .txt file. Use one numeric student ID per line; blank lines are ignored.",
-            bg=COLORS["surface"],
-            fg=COLORS["text"],
-            justify="left",
-            wraplength=390,
-            font=(FONT, 9),
-        ).pack(anchor="w", pady=(3, 0))
-        tk.Label(
-            format_text,
-            text=f"Example from input.txt:\n{self._input_example()}",
-            bg=COLORS["surface"],
-            fg=COLORS["muted"],
-            justify="left",
-            font=("Consolas", 9),
-        ).pack(anchor="w", pady=(8, 0))
-        self._button(format_card, "Import .txt file", self.import_student_ids, secondary=True).pack(
-            side="right", padx=(16, 0), pady=4
-        )
-
-        self.input_text = tk.Text(
-            content,
-            height=10,
-            wrap="none",
-            undo=True,
-            bg=COLORS["surface"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["heading"],
-            relief="flat",
-            highlightbackground=COLORS["border"],
-            highlightcolor=COLORS["accent"],
-            highlightthickness=1,
-            padx=12,
-            pady=10,
-            font=("Consolas", 10),
-        )
-        self.input_text.pack(fill="both", expand=True)
-        self.input_text.insert("1.0", self._read_input_file())
-
-        controls = tk.Frame(content, bg=COLORS["background"], pady=14)
-        controls.pack(fill="x")
-        self._button(controls, "Main menu", self.show_menu, secondary=True).pack(side="left")
-        self._button(controls, "Save to input.txt", self.save_input_file).pack(side="right")
-
-    def show_menu(self):
-        self.editor_frame.destroy()
-        self.menu_frame.pack(fill="both", expand=True)
-
-    def _read_input_file(self):
+    def do_POST(self):  # noqa: N802 - required by BaseHTTPRequestHandler
+        path = urlparse(self.path).path
         try:
-            return INPUT_FILE.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return ""
-
-    def _input_example(self):
-        """Return a small, live sample of the IDs already in input.txt."""
-        student_ids = [line.strip() for line in self._read_input_file().splitlines() if line.strip()]
-        if not student_ids:
-            return "1234567\n2345678"
-
-        example = student_ids[:3]
-        if len(student_ids) > len(example):
-            example.append("...")
-        return "\n".join(example)
-
-    def _validate_student_ids(self, content):
-        """Return cleaned IDs and any non-numeric lines that need correction."""
-        student_ids = []
-        invalid_lines = []
-
-        for line_number, line in enumerate(content.splitlines(), start=1):
-            student_id = line.strip()
-            if not student_id:
-                continue
-            if student_id.isdigit():
-                student_ids.append(student_id)
-            else:
-                invalid_lines.append((line_number, student_id))
-
-        return student_ids, invalid_lines
-
-    def _show_invalid_id_error(self, invalid_lines):
-        """Explain which entries do not match the documented ID format."""
-        examples = "\n".join(
-            f"Line {line_number}: {student_id}" for line_number, student_id in invalid_lines[:5]
-        )
-        remaining = len(invalid_lines) - 5
-        if remaining > 0:
-            examples += f"\n...and {remaining} more."
-
-        messagebox.showerror(
-            "Fix student ID format",
-            "Each non-blank line must contain only one numeric student ID.\n\n"
-            f"Entries to fix:\n{examples}",
-            parent=self,
-        )
-
-    def import_student_ids(self):
-        """Load a selected text file into the editor without saving it yet."""
-        filename = filedialog.askopenfilename(
-            parent=self,
-            title="Import student IDs",
-            initialdir=PROJECT_DIR,
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-        )
-        if not filename:
+            payload = self._read_json()
+        except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
 
+        if path == "/api/student-ids":
+            self._save_student_ids(payload)
+            return
+        if path == "/api/start-log":
+            self._start_log_update()
+            return
+        if path == "/api/add-year":
+            self._add_school_year(payload)
+            return
+        self._send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown action."})
+
+    def _read_json(self) -> dict[str, object]:
         try:
-            imported_content = Path(filename).read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeError) as error:
-            messagebox.showerror(
-                "Could not import file",
-                f"The selected file could not be read.\n\n{error}",
-                parent=self,
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as error:
+            raise ValueError("Invalid request length.") from error
+        if content_length > 1_000_000:
+            raise ValueError("Request is too large.")
+        try:
+            value = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("Please send a valid request.") from error
+        if not isinstance(value, dict):
+            raise ValueError("Please send an object.")
+        return value
+
+    def _save_student_ids(self, payload: dict[str, object]) -> None:
+        raw_ids = payload.get("student_ids", "")
+        if not isinstance(raw_ids, str):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Student IDs must be text."})
+            return
+        student_ids, invalid_lines = validate_student_ids(raw_ids)
+        if invalid_lines:
+            self._send_json(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "Each non-blank line must contain only one numeric student ID.",
+                    "invalid_lines": invalid_lines,
+                },
             )
             return
-
-        self.input_text.delete("1.0", "end")
-        self.input_text.insert("1.0", imported_content)
-        student_ids, invalid_lines = self._validate_student_ids(imported_content)
-        if invalid_lines:
-            self.status.set("The file was loaded, but some IDs need correction before it can be saved.")
-            self._show_invalid_id_error(invalid_lines)
-            return
-
-        self.status.set(
-            f"Loaded {len(student_ids)} student IDs. Review the list, then select Save to input.txt."
-        )
-
-    def save_input_file(self):
-        # Normalize blank lines while retaining the one-ID-per-line file format.
-        student_ids, invalid_lines = self._validate_student_ids(
-            self.input_text.get("1.0", "end-1c")
-        )
-        if invalid_lines:
-            self._show_invalid_id_error(invalid_lines)
-            return
-
         content = "\n".join(student_ids)
         if content:
             content += "\n"
-
         try:
             INPUT_FILE.write_text(content, encoding="utf-8")
         except OSError as error:
-            messagebox.showerror(
-                "Could not save input.txt",
-                f"The student IDs were not saved.\n\n{error}",
-                parent=self,
-            )
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Could not save input.txt: {error}"})
             return
+        self._send_json(HTTPStatus.OK, {"message": f"Saved {len(student_ids)} student IDs."})
 
-        self.status.set(f"Saved {len(content.splitlines())} student IDs to input.txt.")
-        messagebox.showinfo("Saved", "input.txt has been updated.", parent=self)
-
-    def _launch(self, command, message):
-        options = {"cwd": PROJECT_DIR}
-        if os.name == "nt":
-            # addTab.py may prompt for a year when run outside this launcher;
-            # a separate console keeps any script messages visible.
-            options["creationflags"] = subprocess.CREATE_NEW_CONSOLE
-
+    def _start_log_update(self) -> None:
         try:
-            subprocess.Popen(command, **options)
+            launch_automation([sys.executable, "log.py"])
         except OSError as error:
-            messagebox.showerror("Could not start workflow", str(error), parent=self)
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Could not start the log update: {error}"})
             return
+        self._send_json(HTTPStatus.OK, {"message": "The log update opened in a separate window."})
 
-        self.status.set(message)
+    def _add_school_year(self, payload: dict[str, object]) -> None:
+        year = payload.get("year", "")
+        if not isinstance(year, str) or not YEAR_PATTERN.fullmatch(year.strip()):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Use the format YYYY-YYYY, for example 2027-2028."})
+            return
+        try:
+            launch_automation([sys.executable, "-m", "addTab", year.strip()])
+        except OSError as error:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Could not start the school-year tool: {error}"})
+            return
+        self._send_json(HTTPStatus.OK, {"message": f"Creating {year.strip()} tabs in a separate window."})
+
+    def _send_json(self, status: HTTPStatus, payload: dict[str, object]) -> None:
+        data = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, _format, *_args):
+        """Keep routine browser requests out of the launcher's console."""
+
+
+def main() -> None:
+    if not WEB_APP_FILE.is_file():
+        raise FileNotFoundError(f"Could not find {WEB_APP_FILE.name}.")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), TrioToolsHandler)
+    url = f"http://127.0.0.1:{server.server_port}/"
+    print(f"TRIO Tools is running at {url}")
+    webbrowser.open_new_tab(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":
-    AutoLogApp().mainloop()
+    main()

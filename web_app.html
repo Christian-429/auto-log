@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TRIO Tools</title>
+  <link rel="stylesheet" href="web_app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><h1>TRIO Tools</h1><p>Student workflows in one place</p></div>
+      <nav class="nav" aria-label="Tools">
+        <button class="nav-button active" data-view="home">Home</button>
+        <button class="nav-button" data-view="announcement">Weekly announcement</button>
+        <button class="nav-button" data-view="logs">Update logs</button>
+        <button class="nav-button" data-view="year">Add school-year tab</button>
+        <button class="nav-button" data-view="ids">Student IDs</button>
+      </nav>
+    </aside>
+    <main>
+      <header class="page-header"><h2 id="page-title">Welcome to TRIO Tools</h2><p id="page-subtitle">Choose a workflow to get started.</p></header>
+
+      <section class="page active" id="home">
+        <div class="dashboard">
+          <article class="card tool-card"><h3>Weekly Canvas announcement</h3><p>Create a polished, text-first newsletter with a live preview and Canvas-ready HTML.</p><button class="primary" data-view="announcement">Create announcement</button></article>
+          <article class="card tool-card"><h3>Update logs</h3><p>Run the existing automation that reads student IDs and writes appointment information to the log.</p><button class="primary" data-view="logs">Start update</button></article>
+          <article class="card tool-card"><h3>Add a school-year tab</h3><p>Create and prepare a new year tab across student logs using the established automation.</p><button class="primary" data-view="year">Add year tab</button></article>
+          <article class="card tool-card"><h3>Student IDs</h3><p>View, edit, import, or reorder the IDs used by the existing automation scripts.</p><button class="primary" data-view="ids">Manage IDs</button></article>
+        </div>
+      </section>
+
+      <section class="page" id="logs">
+        <div class="card content-card"><h3>Update logs from scratch</h3><p>Start the existing desktop automation from this web dashboard.</p><div class="instructions">Before starting, make sure the appointment site is open in browser tab 1 and the student-log sheet is open in browser tab 2. The script will use the IDs saved under Student IDs.</div><button class="primary" id="start-log">Start log update</button><p class="notice" id="log-notice"></p></div>
+      </section>
+
+      <section class="page" id="year">
+        <div class="card content-card"><h3>Add a new school-year tab</h3><p>Enter the year, then start the existing automation in a separate window.</p><div class="instructions">Make sure the required browser tabs and sheet are open before continuing.</div><div class="field"><label for="school-year">School year <span>Use YYYY-YYYY</span></label><input id="school-year" placeholder="2027-2028" inputmode="numeric"></div><div class="action-row"><button class="primary" id="start-year">Add year tab</button></div><p class="notice" id="year-notice"></p></div>
+      </section>
+
+      <section class="page" id="ids">
+        <div class="card content-card"><h3>Student IDs</h3><p>Use one numeric student ID per line. Blank lines are ignored.</p><div class="field"><label for="student-ids">Saved student IDs</label><textarea id="student-ids" spellcheck="false"></textarea></div><input id="import-ids-file" type="file" accept=".txt,text/plain" hidden><div class="action-row"><button class="secondary" id="import-ids">Import .txt file</button><button class="secondary" id="reload-ids">Reload saved IDs</button><button class="primary" id="save-ids">Save IDs</button></div><p class="notice" id="ids-notice"></p></div>
+      </section>
+
+      <section class="page" id="announcement">
+        <div class="announcement-layout">
+          <div>
+            <h3 class="section-title">Announcement details</h3><p class="section-subtitle">The TRIO banner, Instagram, and counseling links are already included in every newsletter.</p>
+            <div class="card permanent"><strong>Permanent newsletter content</strong>TRIO banner &bull; @arc.triostem &bull; Counseling appointments &bull; Brooke appointments</div>
+            <div class="card form-card"><div class="field"><label for="week">Week or date</label><input id="week"></div><div class="field"><label for="intro">Welcome message</label><textarea id="intro"></textarea></div></div>
+            <h3 class="section-title">Sections</h3><p class="section-subtitle">Turn off any section you do not need, then add only the announcements for this week.</p>
+            <div id="announcement-sections"></div>
+          </div>
+          <aside class="preview-sticky"><div class="preview-bar"><div><h3 class="section-title">Canvas preview</h3><p id="copy-notice">This is what students will see in Canvas.</p></div><button class="primary" id="copy-html">Copy HTML to clipboard</button></div><div class="card preview-frame"><iframe id="canvas-preview" title="Canvas announcement preview"></iframe></div><details class="card"><summary>View generated Canvas HTML</summary><textarea id="generated-html" readonly aria-label="Generated Canvas HTML"></textarea></details></aside>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="web_app.js"></script>
+</body>
+</html>
